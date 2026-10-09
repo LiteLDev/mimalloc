@@ -1,0 +1,82 @@
+name: Update mimalloc
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Force a specific mimalloc version. Leave empty to auto-detect.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-mimalloc
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: microsoft/mimalloc
+  PACKAGE_NAME: mimalloc-windows-x64.zip
+
+jobs:
+  update:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Check for a new mimalloc release
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCED_VERSION: ${{ inputs.version }}
+        run: python scripts/check_update.py
+
+      - name: Checkout mimalloc
+        if: steps.check.outputs.has_update == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ steps.check.outputs.tag }}
+          path: upstream
+
+      - name: Build mimalloc (windows x64)
+        if: steps.check.outputs.has_update == 'true'
+        run: |
+          cmake -S upstream -B upstream/build -A x64 -DCMAKE_BUILD_TYPE=Release -DMI_BUILD_TESTS=OFF
+          cmake --build upstream/build --config Release
+
+      - name: Package release archive
+        if: steps.check.outputs.has_update == 'true'
+        run: python scripts/package.py --build-dir upstream/build --version ${{ steps.check.outputs.version }} --output ${{ env.PACKAGE_NAME }}
+
+      - name: Bump tooth.json
+        if: steps.check.outputs.has_update == 'true'
+        run: python scripts/update_tooth.py ${{ steps.check.outputs.version }}
+
+      - name: Commit tooth.json
+        if: steps.check.outputs.has_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tooth.json
+          git diff --cached --quiet || git commit -m "chore: bump mimalloc to ${{ steps.check.outputs.version }}"
+          git push
+
+      - name: Publish release ${{ steps.check.outputs.tag }}
+        if: steps.check.outputs.has_update == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.check.outputs.tag }}
+          name: mimalloc ${{ steps.check.outputs.tag }}
+          body: |
+            Automated Windows x64 build of upstream mimalloc `${{ steps.check.outputs.tag }}`.
+          files: ${{ env.PACKAGE_NAME }}
