@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Force a specific mimalloc version. Leave empty to auto-detect.
+        description: Force-delete and rebuild a specific mimalloc version. Leave empty to auto-detect.
         required: false
         type: string
 
@@ -50,9 +50,16 @@ jobs:
 
       - name: Build mimalloc (windows x64)
         if: steps.check.outputs.has_update == 'true'
+        env:
+          CL: /Zi
+          LINK: /DEBUG /OPT:REF /OPT:ICF
         run: |
           cmake -S upstream -B upstream/build -A x64 -DCMAKE_BUILD_TYPE=Release -DMI_BUILD_TESTS=OFF
           cmake --build upstream/build --config Release
+
+      - name: Install Python dependencies
+        if: steps.check.outputs.has_update == 'true'
+        run: python -m pip install --disable-pip-version-check pefile
 
       - name: Package release archive
         if: steps.check.outputs.has_update == 'true'
@@ -63,6 +70,7 @@ jobs:
         run: python scripts/update_tooth.py ${{ steps.check.outputs.version }}
 
       - name: Commit tooth.json
+        id: commit
         if: steps.check.outputs.has_update == 'true'
         run: |
           git config user.name "github-actions[bot]"
@@ -70,12 +78,21 @@ jobs:
           git add tooth.json
           git diff --cached --quiet || git commit -m "chore: bump mimalloc to ${{ steps.check.outputs.version }}"
           git push
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "sha=$(git rev-parse HEAD)"
+
+      - name: Remove existing release ${{ steps.check.outputs.tag }}
+        if: steps.check.outputs.has_update == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete ${{ steps.check.outputs.tag }} --yes
 
       - name: Publish release ${{ steps.check.outputs.tag }}
         if: steps.check.outputs.has_update == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.check.outputs.tag }}
+          target_commitish: ${{ steps.commit.outputs.sha }}
           name: mimalloc ${{ steps.check.outputs.tag }}
           body: |
             Automated Windows x64 build of upstream mimalloc `${{ steps.check.outputs.tag }}`.
