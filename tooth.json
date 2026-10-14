@@ -22,25 +22,6 @@
                         {
                             "type": "dir",
                             "src": "mimalloc/",
-                            "dest": "plugins/mimalloc/"
-                        }
-                    ]
-                }
-            ]
-        },
-        {
-            "label": "client",
-            "platform": "win-x64",
-            "assets": [
-                {
-                    "type": "zip",
-                    "urls": [
-                        "https://{{tooth}}/releases/download/v{{version}}/mimalloc-windows-x64.zip"
-                    ],
-                    "placements": [
-                        {
-                            "type": "dir",
-                            "src": "mimalloc/",
                             "dest": "mods/mimalloc/"
                         }
                     ]
